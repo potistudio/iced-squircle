@@ -1,6 +1,7 @@
-//! iced で Squircle (超楕円の角) の面を描くライブラリ。
+//! Squircle (superellipse-cornered) surfaces for iced.
 //!
-//! iced の `border.radius` は円弧の角しか描けないため、canvas で超楕円のパスを描いて中身の下に敷く。
+//! Because iced's `border.radius` only draws circular-arc corners, this crate renders a
+//! superellipse path on a `canvas` and layers it beneath your content.
 //!
 //! ```no_run
 //! use iced::widget::{container, text};
@@ -26,28 +27,29 @@ use iced::widget::canvas::{self, Cache, Geometry, Path, Stroke};
 use iced::widget::{Stack, container};
 use iced::{Color, Element, Fill, Point, Rectangle, Renderer, Shadow, Theme, mouse};
 
-/// 角の丸みの指数。2 で円、大きいほど四角に近い。
+/// Superellipse corner exponent. `2.0` is a circle; larger values approach a rectangle.
 const EXPONENT: f32 = 5.0;
-/// 超楕円の角の大きさ / 同じ深さに見える円弧の半径。
+/// Ratio of superellipse corner extent to the radius of a circular arc of the same depth.
 ///
-/// 対角線方向の削れ具合は円弧が `0.414 r`、指数 5 の超楕円が `0.184 R` なので、`R = 2.25 r` で揃う。
+/// Along the diagonal, a circular arc cuts `0.414 r` off the corner while an exponent-5
+/// superellipse cuts `0.183 R`, so `R = 2.25 r` matches the depth within 1%.
 const EXTENT: f32 = 2.25;
-/// 角1つあたりの分割数。
+/// Number of line segments per corner.
 const STEPS: usize = 24;
 
-/// Squircle の面の見た目。
+/// Appearance of a squircle surface.
 #[derive(Debug, Clone, Copy)]
 pub struct Surface {
-	/// 角の丸み。`border.radius` と同じ感覚で指定できるよう、対角線方向の削れ具合が
-	/// この半径の円弧と同じになる大きさで描く (曲がり始めは円弧より手前になる)。
-	/// 実際の角の大きさは [`path`] を参照。
+	/// Corner roundness. Sized so that the diagonal cut matches a circular arc of this radius,
+	/// allowing values comparable to `border.radius` (though the curve starts farther from the
+	/// corner than a circular arc). See [`path`] for the actual corner extent.
 	pub radius: f32,
 	pub fill: Color,
 	pub border: Option<Color>,
 	pub shadow: Option<Shadow>,
 }
 
-/// `content` の下に squircle の面を敷く。大きさは `content` のまま。
+/// Layers a squircle surface beneath `content`, preserving `content`'s size.
 pub fn squircle<'a, Message: 'a>(content: impl Into<Element<'a, Message>>, surface: Surface) -> Element<'a, Message> {
 	let content = content.into();
 	let size = content.as_widget().size_hint();
@@ -102,15 +104,15 @@ impl<Message> canvas::Program<Message> for Shape {
 	}
 }
 
-/// `rect` を丸み `radius` ([`Surface::radius`]) の squircle にしたパス。
+/// Builds a squircle [`Path`] for `rect` with roundness `radius` (see [`Surface::radius`]).
 ///
-/// canvas で自前に描きたいとき用。
+/// Intended for drawing the outline yourself in a custom `canvas`.
 ///
-/// `radius` は角の大きさそのものではない。同じ深さに見える円弧の半径で、実際に曲がり始める位置は
-/// 角から `radius * 2.25` (幅と高さの半分で頭打ち) になる。`radius` が有限でないときは 0 として扱う
-/// (debug ビルドでは panic する)。
+/// `radius` is not the corner extent itself, but the radius of a circular arc of the same visual
+/// depth; the curve actually starts `radius * 2.25` from each corner (clamped to half the shorter
+/// side). Non-finite values of `radius` are treated as `0` (and panic in debug builds).
 ///
-/// 毎回パスを組み直すので、毎フレーム描くなら [`canvas::Cache`] に乗せること。
+/// The path is rebuilt on every call, so draw it inside a [`canvas::Cache`] if redrawn every frame.
 pub fn path(rect: Rectangle, radius: f32) -> Path {
 	let points = outline(rect, radius);
 	if let [first, rest @ ..] = points.as_slice()
@@ -128,7 +130,8 @@ pub fn path(rect: Rectangle, radius: f32) -> Path {
 	}
 }
 
-/// [`path`] の輪郭の点。右上の角の始まりから時計回りで、角が無ければ空。
+/// Outline points for [`path`], ordered clockwise starting at the top-right corner, or empty if
+/// there are no rounded corners.
 fn outline(rect: Rectangle, radius: f32) -> Vec<Point> {
 	debug_assert!(radius.is_finite(), "squircle radius must be finite, got {radius}");
 	let radius = if radius.is_finite() { radius } else { 0.0 };
@@ -162,9 +165,10 @@ fn outline(rect: Rectangle, radius: f32) -> Vec<Point> {
 	points
 }
 
-/// 第1象限の単位超楕円 `x^n + y^n = 1` を `(1, 0)` から `(0, 1)` まで辿った点。
+/// Points along the first-quadrant unit superellipse `x^n + y^n = 1`, from `(1, 0)` to `(0, 1)`.
 ///
-/// `θ ∈ [0, π/2]` で `(cos^(2/n), sin^(2/n))`。`cos(π/2)` が f32 では僅かに負になるので 0 で潰す。
+/// Sampled as `(cos^(2/n), sin^(2/n))` for `θ ∈ [0, π/2]`. Values are clamped at `0.0` because
+/// `cos(π/2)` is slightly negative in `f32`.
 static QUARTER: LazyLock<[(f32, f32); STEPS + 1]> = LazyLock::new(|| {
 	let power = 2.0 / EXPONENT;
 	std::array::from_fn(|step| {
