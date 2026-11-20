@@ -12,7 +12,7 @@ readme = "README.md"
 keywords = ["iced", "gui", "squircle", "superellipse"]
 categories = ["gui"]
 
-# Stay the workspace root when cloned under a parent workspace that does not list this crate as a member.
+# Keep this crate as its own workspace root when cloned under a parent workspace that does not list it as a member.
 [workspace]
 
 [dependencies]

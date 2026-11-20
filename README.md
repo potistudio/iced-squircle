@@ -28,9 +28,9 @@ fn view<'a, Message: 'a>() -> Element<'a, Message> {
 }
 ```
 
-Specify `radius` like iced's `border.radius`: the corner is sized so it looks as deep as a circular arc of that radius. The curve starts `radius * 2.25` from each corner, clamped to half the width or height, so small surfaces get shallower corners.
+Specify `radius` like iced's `border.radius`: the corner is sized so it looks as deep as a circular arc of that radius. The curve starts `radius * 2.25` from each corner, clamped to half the width or height (whichever is smaller), so small surfaces get shallower corners.
 
-Use `iced_squircle::path(rect, radius)` to build the same `Path` for your own canvas. It rebuilds the path on every call, so keep it in a `canvas::Cache` when drawing every frame. When stroking a border, inset `rect` by half the stroke width so the stroke is not clipped.
+Use `iced_squircle::path(rect, radius)` to build the same `Path` for your own canvas. It rebuilds the path on every call, so draw it inside a `canvas::Cache` if the canvas is redrawn every frame. When stroking a border, inset `rect` by half the stroke width so the stroke is not clipped.
 
 ## Requirements
 
