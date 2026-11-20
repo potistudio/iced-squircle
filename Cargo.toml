@@ -12,8 +12,5 @@ readme = "README.md"
 keywords = ["iced", "gui", "squircle", "superellipse"]
 categories = ["gui"]
 
-# Keep this crate as its own workspace root when cloned under a parent workspace that does not list it as a member.
-[workspace]
-
 [dependencies]
 iced = { version = "0.14.0", features = ["canvas"] }
