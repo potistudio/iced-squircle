@@ -62,7 +62,8 @@ pub fn squircle<'a, Message: 'a>(content: impl Into<Element<'a, Message>>, surfa
 	let Some(shadow) = surface.shadow else {
 		return layered.into();
 	};
-	// canvas ではぼかせないので、影は同じ丸みの円弧の角の影で代用する (ぼけるので形の差はほぼ見えない)。
+	// Canvas cannot blur, so approximate the shadow with circular corners of the same radius
+	// (the blur hides the shape difference).
 	container(layered)
 		.style(move |_| container::Style {
 			border: iced::border::rounded(surface.radius),
@@ -87,7 +88,7 @@ impl<Message> canvas::Program<Message> for Shape {
 	) -> Vec<Geometry> {
 		let surface = self.0;
 		vec![cache.draw(renderer, bounds.size(), |frame| {
-			// 枠線は線の中心がパス上に来るので、半分だけ内側に寄せてはみ出さないようにする。
+			// Strokes are centered on the path, so inset by half the stroke width to stay inside the bounds.
 			let inset = if surface.border.is_some() { 0.5 } else { 0.0 };
 			let rect = Rectangle {
 				x: inset,
@@ -141,8 +142,8 @@ fn outline(rect: Rectangle, radius: f32) -> Vec<Point> {
 	}
 	let (left, top) = (rect.x + r, rect.y + r);
 	let (right, bottom) = (rect.x + rect.width - r, rect.y + rect.height - r);
-	// 各角は単位 1/4 曲線を符号で向きを変えて `r` 倍したもの。曲線は x 軸側から y 軸側へ進むので、
-	// 時計回りにするには右上と左下では逆に辿る。
+	// Each corner mirrors and scales the unit quarter curve by `r`. Since the curve runs from the
+	// x-axis to the y-axis, reverse top-right and bottom-left to traverse clockwise.
 	let corners = [
 		(Point::new(right, top), (1.0, -1.0), true),
 		(Point::new(right, bottom), (1.0, 1.0), false),
@@ -156,7 +157,7 @@ fn outline(rect: Rectangle, radius: f32) -> Vec<Point> {
 		for step in 0..quarter.len() {
 			let (x, y) = quarter[if reversed { quarter.len() - 1 - step } else { step }];
 			let point = Point::new(center.x + sx * r * x, center.y + sy * r * y);
-			// 辺の長さが 0 のとき (ピル形) は隣の角の端と重なるので、同じ点を打たない。
+			// Avoid duplicating the shared endpoint when an edge has zero length (pill shape).
 			if points.last() != Some(&point) {
 				points.push(point);
 			}
@@ -197,7 +198,8 @@ mod tests {
 
 	#[test]
 	fn corners_are_mirror_symmetric() {
-		// 原点中心なら鏡映しは符号の反転になり、丸め誤差も対称に乗るので厳密に比べられる。
+		// Centered at the origin, reflections are exact sign flips with symmetric rounding error,
+		// so we can compare points for exact equality.
 		let rect = Rectangle {
 			x: -100.0,
 			y: -50.0,
@@ -208,10 +210,10 @@ mod tests {
 		let n = STEPS + 1;
 		assert_eq!(points.len(), n * 4);
 		for (i, p) in points[..n].iter().enumerate() {
-			// 右上 ↔ 右下は上下に、右上 ↔ 左上は左右に鏡映し (どちらも辿る向きは逆)。
+			// Top-right mirrors vertically to bottom-right and horizontally to top-left (both reversed).
 			assert_eq!(points[2 * n - 1 - i], Point::new(p.x, -p.y));
 			assert_eq!(points[4 * n - 1 - i], Point::new(-p.x, p.y));
-			// 左下は点対称で、辿る向きは同じ。
+			// Bottom-left is point-symmetric and traversed in the same direction.
 			assert_eq!(points[2 * n + i], Point::new(-p.x, -p.y));
 		}
 	}
@@ -222,7 +224,7 @@ mod tests {
 		let top = points.iter().map(|p| p.y).fold(f32::INFINITY, f32::min);
 		let bottom = points.iter().map(|p| p.y).fold(f32::NEG_INFINITY, f32::max);
 		assert_eq!((top, bottom), (RECT.y, RECT.y + RECT.height));
-		// 左右の辺は長さ 0 なので、角どうしの継ぎ目の点が重複しない。
+		// The left and right edges have zero length, so adjacent corner endpoints must not duplicate.
 		assert!(points.windows(2).all(|w| w[0] != w[1]));
 	}
 
