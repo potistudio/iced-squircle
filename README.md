@@ -34,7 +34,7 @@ Use `iced_squircle::path(rect, radius)` to build the same `Path` for your own ca
 
 ## Requirements
 
-- Rust 1.99.0
+- Rust 1.100.0
 - iced 0.14
 
 ## License
