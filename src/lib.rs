@@ -3,7 +3,7 @@
 //! iced の `border.radius` は円弧の角しか描けないため、canvas で超楕円のパスを描いて中身の下に敷く。
 //!
 //! ```no_run
-//! use iced::widget::text;
+//! use iced::widget::{container, text};
 //! use iced::{Color, Element};
 //! use iced_squircle::{Surface, squircle};
 //!
@@ -15,7 +15,7 @@
 //! };
 //!
 //! fn view<'a, Message: 'a>() -> Element<'a, Message> {
-//!     squircle(text("Hello"), CARD)
+//!     squircle(container(text("Hello")).padding(16), CARD)
 //! }
 //! ```
 
