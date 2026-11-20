@@ -8,7 +8,7 @@ iced's `border.radius` only draws circular-arc corners. This crate draws a super
 
 ```toml
 [dependencies]
-iced-squircle = { git = "https://github.com/potistudio/iced-squircle" }
+iced-squircle = { git = "https://github.com/potistudio/iced-squircle", tag = "v0.1.0" }
 ```
 
 ```rust
