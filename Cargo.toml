@@ -1,13 +1,16 @@
 [package]
 name = "iced-squircle"
 description = "Squircle (superellipse-cornered) surfaces for iced."
-version.workspace = true
-edition.workspace = true
-rust-version.workspace = true
-authors.workspace = true
-license.workspace = true
-publish.workspace = true
-repository.workspace = true
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99.0"
+authors = ["potistudio <potistudio@proton.me>"]
+license = "MIT"
+publish = false
+repository = "https://github.com/potistudio/iced-squircle"
+readme = "README.md"
+keywords = ["iced", "gui", "squircle", "superellipse"]
+categories = ["gui"]
 
 [dependencies]
 iced = { version = "0.14.0", features = ["canvas"] }
