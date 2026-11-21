@@ -25,7 +25,7 @@
 //! ```
 
 use std::cell::Cell;
-use std::f32::consts::{FRAC_1_SQRT_2, FRAC_PI_2};
+use std::f32::consts::FRAC_PI_2;
 
 use iced::border::{self, Radius};
 use iced::widget::canvas::{self, Cache, Geometry, Path, Stroke};
@@ -33,7 +33,7 @@ use iced::widget::{Stack, container};
 use iced::{Color, Element, Fill, Point, Rectangle, Renderer, Shadow, Theme, mouse};
 
 /// Default superellipse exponent (`5.0`), producing the classic squircle. Used by [`path`] and
-/// typically passed to [`Surface::exponent`]; `2.0` is an ellipse, and larger values approach a
+/// typically passed to [`Surface::exponent`]; `2.0` is a circular arc, and larger values approach a
 /// right angle.
 pub const DEFAULT_EXPONENT: f32 = 5.0;
 /// Number of line segments per corner.
@@ -42,25 +42,27 @@ const STEPS: usize = 24;
 /// Appearance of a squircle surface.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Surface {
-	/// Corner roundness, per corner. Each corner is sized so that its diagonal cut matches a
-	/// circular arc of that radius (until the clamp to half the shorter side binds), keeping values
-	/// comparable to `border.radius` (above an exponent of `2.0`, the curve starts farther from the
-	/// corner than a circular arc). Exactly how far depends on [`exponent`](Surface::exponent); see
-	/// [`path_with_exponent`] for the ratio.
+	/// Corner roundness, per corner: the length that corner consumes from each of its two adjacent
+	/// edges. `12.0` makes the curve start 12px from the corner point on both edges, matching the
+	/// corner extent iced's `border.radius` uses (at an exponent of `2.0` the corner is the same
+	/// circular arc). The value does not depend on [`exponent`](Surface::exponent).
+	///
+	/// Each corner is clamped to half of the shorter side. A value at or below `0.0` stays sharp, and
+	/// a non-finite value is treated as `0.0` (and panics in debug builds).
 	///
 	/// Build it from a base radius and override the corners that differ:
 	/// `border::radius(12.0)` rounds all four, `border::radius(0.0).top(12.0)` only the top two,
 	/// and `border::radius(12.0).bottom(0.0)` only the top two as well. Helpers in [`iced::border`]
 	/// such as `border::top(12.0)` are shorthands for the same values.
 	pub radius: Radius,
-	/// Superellipse exponent: how tightly the curve turns toward its corner point. `2.0` is an
-	/// ellipse, and larger values approach a right angle; [`DEFAULT_EXPONENT`] (`5.0`) is the
-	/// classic squircle.
+	/// Superellipse exponent: how tightly the curve turns toward its corner point. `2.0` is a circular
+	/// arc, and larger values approach a right angle; [`DEFAULT_EXPONENT`] (`5.0`) is the classic
+	/// squircle.
 	///
-	/// The exponent also sets how far a corner's curve reaches from its corner point along each
-	/// edge, because [`radius`](Surface::radius) stays tied to the depth of a circular arc:
-	/// the extent is `1.0` times the radius at `2.0`, `2.26` times at `5.0`, and larger still above
-	/// that. See [`path_with_exponent`] for the exact ratio.
+	/// The exponent changes the curve's shape without changing the corner's footprint. The distance
+	/// from the corner point to the curve along the diagonal is `0.414` times the radius at `2.0` (a
+	/// circular arc) and `0.183` times at `5.0`, so a higher exponent keeps the corner closer to a
+	/// right angle.
 	///
 	/// Values below `1.0` are raised to `1.0`, where the corner becomes a straight chamfer, and
 	/// `NaN` falls back to [`DEFAULT_EXPONENT`]. Positive infinity (`f32::INFINITY`) is allowed:
@@ -72,8 +74,9 @@ pub struct Surface {
 }
 
 impl Surface {
-	/// Builds this surface's outline for `rect`: the path [`squircle`] paints beneath your content,
-	/// inset by 0.5px when [`border`](Surface::border) is `Some` to keep the stroke inside.
+	/// Builds this surface's outline for `rect`. [`squircle`] draws this path beneath your content,
+	/// first insetting `rect` by 0.5px to keep the stroke inside when [`border`](Surface::border) is
+	/// `Some`; this method uses `rect` as given.
 	pub fn path(&self, rect: Rectangle) -> Path {
 		path_with_exponent(rect, self.radius, self.exponent)
 	}
@@ -92,11 +95,20 @@ pub fn squircle<'a, Message: 'a>(content: impl Into<Element<'a, Message>>, surfa
 	let Some(shadow) = surface.shadow else {
 		return layered.into();
 	};
-	// Canvas cannot blur, so approximate the shadow with circular corners of the same per-corner
-	// radii (the blur hides the shape difference).
+	// The path draws a non-finite corner as a sharp one, so `container` must receive the same value
+	// instead of a NaN it cannot round.
+	let radius = Radius {
+		top_left: finite_or_zero(surface.radius.top_left),
+		top_right: finite_or_zero(surface.radius.top_right),
+		bottom_right: finite_or_zero(surface.radius.bottom_right),
+		bottom_left: finite_or_zero(surface.radius.bottom_left),
+	};
+	// A canvas cannot blur, so `container` draws the shadow. It rounds corners with circular arcs of
+	// the same per-corner radius, which cut deeper than the superellipse at every exponent above
+	// `2.0` and therefore stay inside it; the blur and the offset spread the shadow outward.
 	container(layered)
 		.style(move |_| container::Style {
-			border: border::rounded(surface.radius),
+			border: border::rounded(radius),
 			shadow,
 			..container::Style::default()
 		})
@@ -165,21 +177,15 @@ pub fn path(rect: Rectangle, radius: impl Into<Radius>) -> Path {
 ///
 /// Intended for drawing the outline yourself in a custom `canvas`.
 ///
-/// Each corner's radius is not the corner extent itself, but the radius of a circular arc of the
-/// same visual depth. Along the diagonal, an arc of radius `r` cuts `r * √2 * (1 - 1/√2)` off the
-/// corner, while a superellipse of extent `R` cuts `R * √2 * (1 - 2^(-1/n))`, so the extent is
-///
-/// ```text
-/// R = r * (1 - 1/√2) / (1 - 2^(-1/n))
-/// ```
-///
-/// which is `1.0 r` for an ellipse (a circular arc at `n = 2.0`) and `2.26 r` at the default
-/// exponent `5.0`, growing from there as `n` increases. Each corner's curve therefore starts `R`
-/// away from that corner, clamped to half the shorter side; a corner at `radius <= 0` stays sharp.
+/// Each corner consumes `radius` from each of the two edges it joins: its curve starts `radius`
+/// away from the corner point on both adjacent edges, clamped to half the shorter side, and a
+/// corner at `radius <= 0` stays sharp. With `n = exponent`, the distance from the corner point to
+/// the curve along the diagonal is `radius * √2 * (1 - 2^(-1/n))`, which is `0.414` times the radius
+/// at `n = 2.0` (a circular arc) and `0.183` times at the default exponent `5.0`.
 ///
 /// `exponent` follows [`Surface::exponent`]: values below `1.0` are raised to `1.0`, and `NaN`
-/// falls back to [`DEFAULT_EXPONENT`]. Any non-finite corner in `radius` is treated as `0` (and
-/// panics in debug builds).
+/// falls back to [`DEFAULT_EXPONENT`]. Any non-finite corner value in `radius` is treated as `0`
+/// (and panics in debug builds).
 ///
 /// The path is rebuilt on every call, so draw it inside a [`canvas::Cache`] if the canvas is redrawn
 /// every frame.
@@ -204,13 +210,12 @@ pub fn path_with_exponent(rect: Rectangle, radius: impl Into<Radius>, exponent: 
 /// there are no rounded corners.
 fn outline(rect: Rectangle, radius: Radius, exponent: f32) -> Vec<Point> {
 	let exponent = clamp_exponent(exponent);
-	let ratio = extent_ratio(exponent);
 	// Corner order matches the traversal: top-right, bottom-right, bottom-left, top-left.
 	let extents = [
-		corner_extent(rect, radius.top_right, ratio),
-		corner_extent(rect, radius.bottom_right, ratio),
-		corner_extent(rect, radius.bottom_left, ratio),
-		corner_extent(rect, radius.top_left, ratio),
+		corner_extent(rect, radius.top_right),
+		corner_extent(rect, radius.bottom_right),
+		corner_extent(rect, radius.bottom_left),
+		corner_extent(rect, radius.top_left),
 	];
 	if extents.iter().all(|&r| r == 0.0) {
 		return Vec::new();
@@ -247,30 +252,22 @@ fn outline(rect: Rectangle, radius: Radius, exponent: f32) -> Vec<Point> {
 	points
 }
 
-/// Distance from a corner along each adjacent edge covered by that corner's curve.
-fn corner_extent(rect: Rectangle, radius: f32, ratio: f32) -> f32 {
+/// Length of each adjacent edge consumed by the corner rounded with `radius`.
+fn corner_extent(rect: Rectangle, radius: f32) -> f32 {
 	debug_assert!(radius.is_finite(), "squircle radius must be finite, got {radius}");
-	let radius = if radius.is_finite() { radius } else { 0.0 };
+	let radius = finite_or_zero(radius);
 	let limit = (rect.width / 2.0).min(rect.height / 2.0);
-	// Stop before multiplying so that `0 * inf` cannot round a sharp corner, and treat a non-positive
-	// `rect` as having no corner to round. `squircle()` never passes one, but `path()` and
-	// `path_with_exponent()` are public and a caller can.
+	// A non-positive `rect` reaches this function through the public `path()` functions, and a
+	// negative limit would mirror the curve across the corner point instead of leaving it sharp.
 	if radius <= 0.0 || limit <= 0.0 {
 		return 0.0;
 	}
-	(radius * ratio).min(limit)
+	radius.min(limit)
 }
 
-/// Ratio of a corner's extent to the radius of a circular arc cutting the same diagonal depth.
-///
-/// Along the diagonal, a circular arc of radius `r` cuts `r * √2 * (1 - 1/√2)` off the corner,
-/// while a superellipse of extent `R` cuts `R * √2 * (1 - 2^(-1/n))`, so the ratio is
-/// `(1 - 1/√2) / (1 - 2^(-1/n))`. It is `1.0` for an ellipse (`n = 2`) and grows without bound as
-/// `n` approaches infinity (a right angle), where the caller clamps the extent to half the shorter
-/// side.
-fn extent_ratio(exponent: f32) -> f32 {
-	const CIRCLE_CUT: f32 = 1.0 - FRAC_1_SQRT_2;
-	CIRCLE_CUT / (1.0 - (-1.0 / exponent).exp2())
+/// Zeroes a non-finite radius, which both the outline and the shadow draw as a sharp corner.
+fn finite_or_zero(radius: f32) -> f32 {
+	if radius.is_finite() { radius } else { 0.0 }
 }
 
 /// Restricts `exponent` to the range the outline can draw: at least `1.0`, below which the curve
@@ -376,7 +373,6 @@ mod tests {
 
 	#[test]
 	fn each_corner_uses_its_own_extent() {
-		let ratio = extent_ratio(DEFAULT_EXPONENT);
 		let radius = Radius {
 			top_left: 8.0,
 			top_right: 0.0,
@@ -390,8 +386,8 @@ mod tests {
 		assert!(points.contains(&Point::new(right, top)));
 		assert!(points.contains(&Point::new(left, bottom)));
 		// Rounded corners start at their own extent along each adjacent edge.
-		assert!(points.contains(&Point::new(left, top + 8.0 * ratio)));
-		assert!(points.contains(&Point::new(right, bottom - 4.0 * ratio)));
+		assert!(points.contains(&Point::new(left, top + 8.0)));
+		assert!(points.contains(&Point::new(right, bottom - 4.0)));
 	}
 
 	#[test]
@@ -422,43 +418,53 @@ mod tests {
 	}
 
 	#[test]
-	fn extent_ratio_matches_a_circle_at_exponent_2() {
-		assert!((extent_ratio(2.0) - 1.0).abs() < 1e-6);
-	}
-
-	#[test]
-	fn extent_ratio_matches_the_documented_table() {
-		assert_eq!(DEFAULT_EXPONENT, 5.0);
-		let table = [
-			(2.0, 1.00),
-			(3.0, 1.42),
-			(4.0, 1.84),
-			(5.0, 2.26),
-			(6.0, 2.68),
-			(8.0, 3.53),
-		];
-		for (exponent, ratio) in table {
-			assert!((extent_ratio(exponent) - ratio).abs() < 5e-3, "exponent {exponent}");
-		}
-		assert!(table.windows(2).all(|w| w[0].1 < w[1].1));
-	}
-
-	#[test]
-	fn exponent_decides_the_corner_extent() {
+	fn radius_is_the_corner_extent_at_every_exponent() {
 		let square = Rectangle {
 			x: 0.0,
 			y: 0.0,
 			width: 100.0,
 			height: 100.0,
 		};
-		// An ellipse starts exactly `radius` from the corner along each edge.
-		let points = outline(square, 10.0.into(), 2.0);
-		assert!(points.iter().any(|p| (p.x - 90.0).abs() < 1e-3 && p.y.abs() < 1e-3));
-		assert!(
-			points
+		// A corner starts `radius` from its corner point on both adjacent edges, whatever the
+		// exponent is.
+		for exponent in [1.0, 2.0, DEFAULT_EXPONENT, 8.0] {
+			let points = outline(square, 10.0.into(), exponent);
+			assert!(
+				points.iter().any(|p| (p.x - 90.0).abs() < 1e-3 && p.y.abs() < 1e-3),
+				"exponent {exponent}"
+			);
+			assert!(
+				points
+					.iter()
+					.any(|p| (p.x - 100.0).abs() < 1e-3 && (p.y - 10.0).abs() < 1e-3),
+				"exponent {exponent}"
+			);
+		}
+	}
+
+	#[test]
+	fn corner_depth_matches_the_documented_table() {
+		let square = Rectangle {
+			x: 0.0,
+			y: 0.0,
+			width: 100.0,
+			height: 100.0,
+		};
+		let radius = 10.0;
+		let corner = Point::new(100.0, 0.0);
+		// Distance from the corner point to the top-right curve along the diagonal, in units of
+		// `radius`. A projection onto the diagonal bounds each sampled point from below.
+		let depth = |exponent: f32| {
+			let points = outline(square, radius.into(), exponent);
+			points[..=STEPS]
 				.iter()
-				.any(|p| (p.x - 100.0).abs() < 1e-3 && (p.y - 10.0).abs() < 1e-3)
-		);
+				.map(|p| (corner.x - p.x + p.y) / std::f32::consts::SQRT_2 / radius)
+				.fold(f32::INFINITY, f32::min)
+		};
+		// The table in the README lists these ratios for the same exponents.
+		for (exponent, ratio) in [(2.0, 0.414), (3.0, 0.292), (5.0, 0.183), (8.0, 0.117)] {
+			assert!((depth(exponent) - ratio).abs() < 1e-3, "exponent {exponent}");
+		}
 	}
 
 	#[test]
@@ -483,8 +489,8 @@ mod tests {
 
 	#[test]
 	fn huge_finite_exponent_stays_inside_the_rect() {
-		// `2^(-1/n)` rounds to `1.0` above about `n = 1e7`, so `extent_ratio` returns infinity and the
-		// extent has to come from the clamp.
+		// `2^(-1/n)` rounds to `1.0` above about `n = 1e7`, collapsing the curve onto the corner
+		// point; the outline must still cover the whole rect with finite coordinates.
 		let points = outline(RECT, 8.0.into(), 2e7);
 		assert!(points.iter().all(|p| p.x.is_finite() && p.y.is_finite()));
 		let span = |values: Vec<f32>| {

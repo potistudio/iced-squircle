@@ -2,7 +2,7 @@
 
 > Squircle (superellipse-cornered) surfaces for [iced](https://github.com/iced-rs/iced).
 
-This crate paints a superellipse (`|x|^n + |y|^n = 1`, with `n = 5` unless you change it) outline into a `canvas` to draw smooth rounded corners. Whereas a circular arc has constant curvature that drops abruptly to zero at a straight edge, a superellipse leaves each edge tangentially with zero curvature. It tightens to its sharpest point on the diagonal and loosens again into the next edge, so the corner has no visible seam where it starts or ends.
+This crate paints a superellipse outline (`|x|^n + |y|^n = 1`, with `n = 5` unless you change it) into a `canvas` to draw smooth rounded corners. Whereas a circular arc has constant curvature that drops abruptly to zero at a straight edge, a superellipse leaves each edge tangentially with zero curvature. It tightens to its sharpest point on the diagonal and loosens again into the next edge, so the corner has no visible seam where it starts or ends.
 
 `iced-squircle` only supplies the background shape. Your content is placed on top of it unchanged, so give the content a transparent background unless you want it to hide the surface.
 
@@ -72,25 +72,26 @@ A corner left at `0.0` stays a sharp right angle, and the outline runs a straigh
 
 ## How `radius` is measured
 
-Each per-corner value is **not** the size of that corner. It is the radius of a circular arc that cuts the corner to the same depth, whatever the exponent is — until the clamp to half the shorter side binds, as described below.
+Each per-corner value is the length that corner consumes from each of its two adjacent edges: the curve starts `radius` away from the corner point on both edges. That is the quantity `border.radius` sets for iced's own corners, and at `exponent: 2.0` the corner is the same circular arc. The value is independent of the exponent, so changing the exponent never moves where a corner begins.
 
-Measured along the diagonal, a circular arc of radius `r` cuts `r * (√2 - 1)` (`0.414 r`) off the corner, while a superellipse of exponent `n` and corner extent `R` cuts `R * √2 * (1 - 2^(-1/n))` (`0.183 R` when `n = 5`). Matching the two depths fixes the extent:
+At exponents above `2.0`, a superellipse stays closer to its corner point than a circular arc of the same radius. Measured along the diagonal, an arc of radius `r` sits `r * (√2 - 1)` (`0.414 r`) from the corner point, while a superellipse of exponent `n` and extent `R = radius` sits `R * √2 * (1 - 2^(-1/n))` from it:
 
-```text
-R = r * (1 - 1/√2) / (1 - 2^(-1/n))
-```
+| `exponent` | Diagonal cut per unit of `radius` |
+| ---------- | --------------------------------- |
+| `2`        | `0.414`                           |
+| `3`        | `0.292`                           |
+| `5`        | `0.183`                           |
+| `8`        | `0.117`                           |
 
-That is `1.0 r` at `n = 2`, `2.26 r` at the default `n = 5`, and it keeps growing as the corner squares off. Each corner's curve therefore starts `radius * 2.26` away from the corner at the default exponent — farther out than a circular arc — yet reaches the same depth along the diagonal.
+Each corner is then clamped to half of the shorter side, which gives three cases per corner:
 
-That extent is then clamped to half of the shorter side, which gives three cases per corner:
+| Per-corner `radius`                   | Result for that corner                                        |
+| ------------------------------------- | ------------------------------------------------------------- |
+| `<= 0` or non-finite                  | Sharp right angle; a non-finite value panics in debug builds. |
+| `0 < radius < min(width, height) / 2` | Extent is `radius`.                                           |
+| `radius >= min(width, height) / 2`    | Extent is clamped to `min(width, height) / 2`.                |
 
-| Per-corner `radius`                         | Result for that corner                                        |
-| ------------------------------------------- | ------------------------------------------------------------- |
-| `<= 0` or non-finite                        | Sharp right angle; a non-finite value panics in debug builds. |
-| `0 < radius * R/r < min(width, height) / 2` | Extent is `radius * R/r`.                                     |
-| `radius * R/r >= min(width, height) / 2`    | Extent is clamped to `min(width, height) / 2`.                |
-
-Every corner is clamped to half of the *shorter* side, so adjacent extents never overlap. At the limit they meet, producing a pill (or a closed superellipse for a square). Corners with different extents are joined by a straight edge, which is shorter than the side whenever either corner is rounded.
+Every corner is clamped to half of the *shorter* side, so adjacent extents never overlap. At the limit they meet, producing a pill (or a closed superellipse for a square). Adjacent rounded corners are joined by a straight edge along the part of the side their extents leave uncovered, which is shorter than the side whenever either corner is rounded.
 
 ## The exponent
 
@@ -103,20 +104,9 @@ Every corner is clamped to half of the *shorter* side, so adjacent extents never
 | `5`        | The default (`DEFAULT_EXPONENT`): the classic squircle shape. |
 | toward `∞` | Approaches a plain right angle.                               |
 
-Values below `1` are raised to `1`, and `NaN` falls back to `DEFAULT_EXPONENT`, so no input can produce a broken outline. A positive infinite exponent (`f32::INFINITY`) is allowed and produces a plain rectangle.
+Values below `1` are raised to `1`, and `NaN` falls back to `DEFAULT_EXPONENT`, so no input can produce a broken outline. Positive infinity (`f32::INFINITY`) is allowed and produces a plain rectangle.
 
-Because `radius` keeps its meaning at every exponent, raising the exponent makes each rounded corner consume more of its two edges while keeping the same depth:
-
-| `exponent` | Corner extent per unit of `radius` |
-| ---------- | ---------------------------------- |
-| `2`        | `1.00`                             |
-| `3`        | `1.42`                             |
-| `4`        | `1.84`                             |
-| `5`        | `2.26`                             |
-| `6`        | `2.68`                             |
-| `8`        | `3.53`                             |
-
-Keep that in mind when a corner must not swallow much of the widget: the clamp to half the shorter side arrives sooner at a higher exponent.
+The exponent changes the curve's shape only. A corner keeps the extent `radius` gives it and moves closer to its corner point as the exponent rises, so the diagonal cut listed above shrinks; the clamp threshold stays at half of the shorter side.
 
 ## How `squircle()` builds the element
 
@@ -130,19 +120,19 @@ The fields of `Surface` behave as follows:
 
 | Field      | Behavior                                                                                                                                                                                                     |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `radius`   | Corner roundness, per corner, as described above.                                                                                                                                                            |
-| `exponent` | Corner tightness, as described above. Usually `DEFAULT_EXPONENT`; together with `radius`, it sets how far each corner extends along its edges.                                                               |
+| `radius`   | Corner roundness, per corner, as the length consumed from each adjacent edge.                                                                                                                                |
+| `exponent` | Corner tightness. Usually `DEFAULT_EXPONENT`; it changes the curve's shape only and leaves the corner extent set by `radius` unchanged.                                                                      |
 | `fill`     | Always painted. There is no "no background" mode, so use `Color::TRANSPARENT` to draw the border alone.                                                                                                      |
 | `border`   | Optional 1px stroke. When `Some`, the path is inset by 0.5px on all sides so the stroke stays inside the bounds, which also pulls the fill in by 0.5px. A thicker border needs `path()` and your own canvas. |
 | `shadow`   | Optional drop shadow (see below).                                                                                                                                                                            |
 
-A canvas cannot blur, so a shadow cannot follow the superellipse. When `shadow` is `Some`, the result is wrapped in a padding-free `container`, and the shadow is left to iced, which casts it from a rounded rectangle whose circular corners use the same per-corner radii and therefore the same depth as the superellipse. The blur hides the difference, but the shape of the shadow is approximated rather than exact. This wrapper is the only thing `shadow` changes: you get a `container` instead of the bare `Stack`, at the same size.
+A canvas cannot blur, so a shadow cannot follow the superellipse. When `shadow` is `Some`, the result is wrapped in a padding-free `container`, and the shadow is left to iced, which casts it from a rounded rectangle whose circular corners reuse the same per-corner radii. An arc of radius `r` cuts `0.414 r` off its corner, deeper than the superellipse cuts at any exponent above `2.0` (`0.183 r` at the default), so for those exponents the approximated shadow stays inside the surface and only its blur and offset spread outward. Below `2.0`, the arc cuts less than the outline, so a shadow corner can show outside the surface. The blur hides the difference, but the shape of the shadow is approximated rather than exact. This wrapper is the only thing `shadow` changes: you get a `container` instead of the bare `Stack`, at the same size.
 
 One thing `squircle()` does not do is clip. The surface is only a background, so content that extends all the way into a corner — a background color, an image, or its own border — will paint over the curve with square corners. Keep such content inside the padding.
 
 ## Drawing the path yourself
 
-`Surface::path(rect)` returns the outline `squircle()` paints as a `canvas::Path` for the same `rect` (when `border` is `Some`, `squircle()` first insets it by 0.5px), so you can draw it in your own `canvas::Program` — for example, with a different fill, a gradient, a thicker stroke, or other geometry in the same frame. `path(rect, radius)` returns the same outline at `DEFAULT_EXPONENT`, and `path_with_exponent(rect, radius, exponent)` lets you choose the exponent. In both functions, `radius` accepts either a `Radius` (like `Surface::radius`) or a single `f32` for all four corners.
+`Surface::path(rect)` returns the outline `squircle()` paints as a `canvas::Path` for `rect` (when `border` is `Some`, `squircle()` first insets `rect` by 0.5px), so you can draw it in your own `canvas::Program` — for example, with a different fill, a gradient, a thicker stroke, or other geometry in the same frame. `path(rect, radius)` returns the same outline at `DEFAULT_EXPONENT`, and `path_with_exponent(rect, radius, exponent)` lets you choose the exponent. In both functions, `radius` accepts either a `Radius` (like `Surface::radius`) or a single `f32` for all four corners.
 
 ```rust
 // Inside canvas::Program::draw for a 200x100 frame, inset by 0.5px for a 1px stroke
@@ -160,6 +150,10 @@ Keep these in mind:
 - When stroking, inset `rect` by half the stroke width; otherwise, the stroke is clipped at the bounds.
 - The outline is a polygon with 24 line segments per rounded corner; a corner left at `radius <= 0` is a single sharp point.
 - A non-finite `radius` panics via `debug_assert!` in debug builds and is treated as `0` in release builds.
+
+## Upgrading from the arc-equivalent radius
+
+Earlier versions of this crate treated `radius` as the radius of a circular arc that cut the corner to the same depth, so at the default exponent the curve started `2.26` times as far from the corner point. `radius` is now the corner extent itself: `radius: 12.0` draws a corner that consumes 12px of each adjacent edge, where the same value covered about 27px before. To keep the earlier shape, multiply the value by `2.26` at the default exponent, or by `(1 - 1/√2) / (1 - 2^(-1/n))` at another exponent `n`. The clamp to half the shorter side now binds at `radius >= min(width, height) / 2`, where at the default exponent it used to bind at about a quarter of the shorter side (roughly `0.22 * min(width, height)`).
 
 ## License
 
