@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+    tags: ["v*"]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+  RUSTDOCFLAGS: -D warnings
+
+jobs:
+  check:
+    name: fmt, clippy, test, doc
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install system libraries for iced
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-dev libwayland-dev
+      # rust-toolchain.toml selects the toolchain and its rustfmt and clippy components.
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets --locked
+      - run: cargo test --locked
+      - run: cargo test --release --locked
+      # Clippy does not link, so build the example to check that it links against a real renderer.
+      - run: cargo build --examples --locked
+      - run: cargo doc --no-deps --locked
+
+  msrv:
+    name: MSRV (library only)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # The development dependencies need a newer compiler, so only the library is checked.
+      - run: rustup toolchain install 1.88.0 --profile minimal
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo +1.88.0 check --lib --locked
