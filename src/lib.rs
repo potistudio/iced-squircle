@@ -202,10 +202,10 @@ impl Outline {
 ///
 /// A canvas cannot blur, so the `container` casts [`Surface::shadow`] from a rounded rectangle with
 /// circular corners, sized so that each arc stays inside the superellipse it approximates. At an
-/// exponent of `2.0` or more the arc keeps the corner's radius, which cuts at least as deep as the
-/// superellipse; below `2.0` the arc's radius grows until it cuts as deep as the flatter curve, up
-/// to `1.71` times the corner's radius at `1.0`. The renderer clamps the arc's radius to half of the
-/// shorter side, and once that clamp applies the arc no longer reaches as deep as the corner: at an
+/// exponent of `2.0` or more the arc keeps the corner's radius and cuts at least as deep as the
+/// superellipse; below `2.0` the arc's radius grows until it cuts as deep as the flatter curve, by
+/// a factor of up to `1.71` at `1.0`. The renderer clamps the arc's radius to half of the shorter
+/// side, and once that clamp applies the arc no longer cuts as deep as the superellipse: at an
 /// exponent of `1.0` with every corner at half of the shorter side, the shadow's corner sticks out
 /// of the outline by `0.29` times half of the shorter side along the diagonal. Below `2.0`, keep
 /// each corner's radius at or below half of the shorter side divided by that growth factor (`0.59`
